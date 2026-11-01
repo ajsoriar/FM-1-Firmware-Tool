@@ -1,6 +1,31 @@
 # FM-1 Firmware Tool
 
-A Windows app for installing a locally saved `.fwsc` firmware package when the official web installer cannot complete the update.
+## What problem does this app solve?
+
+Sometimes an M-VAVE FM-1 gets stuck in a reboot loop and the web updater (https://thefirmwarehub.com/) cannot complete the firmware update. The unit may restart repeatedly and report the same firmware version, leaving the normal update route unable to recover it. This Windows tool provides a local recovery route using a saved `.fwsc` firmware package. It accesses the FM-1's recovery mode, makes a verified backup, writes the firmware region, and checks that the result matches the package.
+
+### Why can the updater get stuck?
+
+The symptom alone does not identify one definite cause. The update may not have written the new firmware, a write may have been interrupted, or the firmware may have been written but failed to start. In any of those cases, seeing the same version again is not proof that the update completed; it may simply be the version that remains installed. The FM-1 also has a chip-level recovery mode that can be used separately from its normal firmware. Community technical notes describe that recovery path, but diagnosing the cause on a particular unit requires its update history and device behavior.
+
+### How the app recovers the FM-1
+
+1. It checks the local `.fwsc` package, the PC environment, and the recovery engine before accessing the device.
+2. If the FM-1 is still running normal firmware, the app sends the `UBOOT` ROM key after checking the device identity. **Auto fill with UBOOT is on by default**; you can switch it off to require a confirmation window. A black screen while it enters recovery mode is expected.
+3. It checks that exactly one `WL82 UBOOT1.00` recovery disk is present and verifies the chip and flash identifiers.
+4. It reads the full flash twice and compares the reads, then verifies the saved backup. **Auto fill with WRITE is off by default**, so the app asks for the exact `WRITE` confirmation. You can opt in to sending it automatically after the backup is verified.
+5. It writes only the firmware region (`0x4000..0x92FFF`); the boot head (`0x0000..0x3FFF`) is left untouched. It then reads the written region back and compares it byte by byte.
+6. After verification, you power-cycle the FM-1 and run **Check boot** to confirm that the firmware starts.
+
+### Advantages and trade-offs
+
+1. **A recovery route when the web update is unavailable:** the app writes from a local firmware package through the chip's recovery mode rather than relying on the running firmware to complete its own update.
+2. **A checked way back:** the full-flash backup must pass two matching reads and a file read-back check before the app offers the write confirmation.
+3. **A limited, verified write:** the boot head is preserved, and the firmware region is read back after writing.
+4. **The process still carries risk:** a power loss or disconnection during erase, write, or verification can leave the firmware region incomplete. Keep the FM-1 powered and connected, and follow the app's warnings.
+5. **It needs the right inputs and setup:** use a valid local `.fwsc` package, a USB data cable, and administrator privileges for the recovery operation. The optional automatic `WRITE` confirmation removes a deliberate pause and should only be enabled if that is what you intend. The app does not repair hardware faults or extract firmware from `.exe` or `.zip` installers.
+
+The app uses the pinned recovery engine in `motor/`. It is an independent recovery utility and is not an official M-VAVE product. See the [M-VAVE FM-1 product page](https://www.m-vave.com/product?id=fm-1) for the manufacturer's firmware and software, and the community [FM-1 recovery notes](https://github.com/aroum/fm1-custom-fw/blob/main/REVERSE_ENGINEERING.md) for background on the chip-level recovery mode.
 
 ## Quick start
 
@@ -28,11 +53,31 @@ Open Command Prompt or PowerShell in the project folder. For installation, run t
 .\fm1.bat detect
 ```
 
-`check` inspects the package and local setup without accessing the FM-1. For more help, run `.\fm1.bat install --help`.
+`check` inspects the package and local setup without accessing the FM-1. For more help, run:
+
+```powershell
+.\fm1.bat install --help
+```
+
+## Development quick start
+
+Run the hardware-free test suite from the project folder:
+
+```powershell
+py -m unittest discover -s tests
+```
+
+Build the Windows app with:
+
+```powershell
+.\build.ps1
+```
+
+The build script creates an isolated `.venv`, installs pinned dependencies, checks the recovery-engine files, runs the tests, and creates a versioned app folder and ZIP under `dist\`. Set the version in `app/__init__.py` (`__version__`) before a release. The ZIP contains the full application folder; do not distribute the EXE on its own.
 
 ## More information
 
-See [Technical details](TECHNICAL_DETAILS.md) for recovery and safety checks, simulation, troubleshooting, and development or build instructions.
+See [Technical details](TECHNICAL_DETAILS.md) for recovery and safety checks, simulation, troubleshooting, and build details.
 
 ## License
 
