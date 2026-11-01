@@ -1,5 +1,7 @@
 # FM-1 Firmware Tool
 
+![FM-1 Firmware Tool application window](docs/images/app-screen.png)
+
 ## What problem does this app solve?
 
 Sometimes an M-VAVE FM-1 gets stuck in a reboot loop and the web updater (https://thefirmwarehub.com/) cannot complete the firmware update. The unit may restart repeatedly and report the same firmware version, leaving the normal update route unable to recover it. This Windows tool provides a local recovery route using a saved `.fwsc` firmware package. It accesses the FM-1's recovery mode, makes a verified backup, writes the firmware region, and checks that the result matches the package.
@@ -13,17 +15,17 @@ The symptom alone does not identify one definite cause. The update may not have 
 1. It checks the local `.fwsc` package, the PC environment, and the recovery engine before accessing the device.
 2. If the FM-1 is still running normal firmware, the app sends the `UBOOT` ROM key after checking the device identity. **Auto fill with UBOOT is on by default**; you can switch it off to require a confirmation window. A black screen while it enters recovery mode is expected.
 3. It checks that exactly one `WL82 UBOOT1.00` recovery disk is present and verifies the chip and flash identifiers.
-4. It reads the full flash twice and compares the reads, then verifies the saved backup. **Auto fill with WRITE is off by default**, so the app asks for the exact `WRITE` confirmation. You can opt in to sending it automatically after the backup is verified.
+4. It reads the full flash twice and compares the reads, then verifies the saved backup. **Auto fill with WRITE is on by default**, so the app sends `WRITE` automatically after the backup is verified. Switch it off to require the exact `WRITE` confirmation window.
 5. It writes only the firmware region (`0x4000..0x92FFF`); the boot head (`0x0000..0x3FFF`) is left untouched. It then reads the written region back and compares it byte by byte.
 6. After verification, you power-cycle the FM-1 and run **Check boot** to confirm that the firmware starts.
 
 ### Advantages and trade-offs
 
 1. **A recovery route when the web update is unavailable:** the app writes from a local firmware package through the chip's recovery mode rather than relying on the running firmware to complete its own update.
-2. **A checked way back:** the full-flash backup must pass two matching reads and a file read-back check before the app offers the write confirmation.
+2. **A checked way back:** the full-flash backup must pass two matching reads and a file read-back check before the app proceeds with the firmware write.
 3. **A limited, verified write:** the boot head is preserved, and the firmware region is read back after writing.
 4. **The process still carries risk:** a power loss or disconnection during erase, write, or verification can leave the firmware region incomplete. Keep the FM-1 powered and connected, and follow the app's warnings.
-5. **It needs the right inputs and setup:** use a valid local `.fwsc` package, a USB data cable, and administrator privileges for the recovery operation. The optional automatic `WRITE` confirmation removes a deliberate pause and should only be enabled if that is what you intend. The app does not repair hardware faults or extract firmware from `.exe` or `.zip` installers.
+5. **It needs the right inputs and setup:** use a valid local `.fwsc` package, a USB data cable, and administrator privileges for the recovery operation. Automatic `WRITE` confirmation is on by default; switch it off if you want to type `WRITE` manually. The app does not repair hardware faults or extract firmware from `.exe` or `.zip` installers.
 
 The app uses the pinned recovery engine in `motor/`. It is an independent recovery utility and is not an official M-VAVE product. See the [M-VAVE FM-1 product page](https://www.m-vave.com/product?id=fm-1) for the manufacturer's firmware and software, and the community [FM-1 recovery notes](https://github.com/aroum/fm1-custom-fw/blob/main/REVERSE_ENGINEERING.md) for background on the chip-level recovery mode.
 

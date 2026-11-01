@@ -11,7 +11,7 @@ This page covers the recovery checks, safety behavior, simulation, and developme
 
 ## Recovery and safety checks
 
-Before writing, the installer checks the package and local environment, detects the FM-1, and reads the full flash twice. The two backup reads must match. The app then shows a summary and requires the exact confirmation `WRITE` before the recovery engine can write firmware.
+Before writing, the installer checks the package and local environment, detects the FM-1, and reads the full flash twice. The two backup reads must match, and the saved backup is verified. In the GUI, **Auto fill with WRITE is on by default**: after these checks, the app shows the write summary and sends `WRITE` automatically. Turn that option off to require the exact `WRITE` confirmation in a dialog. The console `install` command always requires the exact typed confirmation.
 
 If the FM-1 is running normal firmware, the app asks for `UBOOT` before sending the ROM key. The screen going black while the device enters ROM mode is expected. In ROM mode, the recovery engine checks for exactly one `WL82 UBOOT1.00` device, chip key `0x980F`, and Flash ID `0x856014`.
 
@@ -32,7 +32,7 @@ Backups are saved by default under `Documents\FM1-Installer\backups`; logs go un
 
 Run `.\fm1.bat install`, `.\fm1.bat check`, or `.\fm1.bat detect` from the project folder. Run the console as administrator for installation; the console cannot request elevation itself. `check` reads the package and environment without accessing the FM-1. `detect` performs a read-only device check.
 
-`install` uses the same checks and confirmations as the GUI. It asks for `UBOOT` when needed and then `WRITE`; the confirmations cannot be skipped. After the write is verified, it prompts for the manual power cycle and checks boot. `--no-boot-check` exits before the boot check.
+`install` uses the same recovery checks as the GUI. It asks for `UBOOT` when needed and then `WRITE`; console confirmations cannot be skipped. After the write is verified, it prompts for the manual power cycle and checks boot. `--no-boot-check` exits before the boot check.
 
 Exit codes:
 
@@ -79,4 +79,4 @@ Build the Windows app with:
 
 The script creates an isolated `.venv`, installs pinned runtime and build dependencies, checks `motor/pins.json`, runs the tests, and creates versioned output such as `dist/FM1FirmwareTool-1.0.0/` and `dist/FM1FirmwareTool-1.0.0-Windows-x64.zip`. Set the application version in `app/__init__.py` (`__version__`) before a release. The build currently uses Python 3.14. An internet connection is needed the first time to download build dependencies. The ZIP contains the full application folder; do not distribute the EXE on its own.
 
-The GitHub Actions workflow `.github/workflows/build-windows.yml` runs manually or when a `v*` tag is pushed. It uploads the ZIP as a workflow artifact for 30 days.
+The GitHub Actions workflow `.github/workflows/build-windows.yml` runs manually or when a `v*` tag is pushed. Each run uploads the ZIP as a workflow artifact for 30 days. A successful tagged build also publishes the ZIP as an asset on a GitHub Release, with automatically generated release notes. The release job has `contents: write` permission and verifies that the tag already exists.
