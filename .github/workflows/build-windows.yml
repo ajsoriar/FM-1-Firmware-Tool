@@ -32,3 +32,21 @@ jobs:
           path: dist/FM1FirmwareTool-*-Windows-x64.zip
           if-no-files-found: error
           retention-days: 30
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download Windows ZIP
+        uses: actions/download-artifact@v8
+        with:
+          name: FM1FirmwareTool-Windows-x64
+          path: dist
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" dist/*.zip --verify-tag --generate-notes
