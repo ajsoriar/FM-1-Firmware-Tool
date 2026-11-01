@@ -1,0 +1,12 @@
+* text=auto eol=lf
+*.bat  text eol=crlf
+*.cmd  text eol=crlf
+*.ps1  text eol=crlf
+
+# Vendored engine: must stay byte-exact (verified against motor/pins.json)
+motor/** -text
+
+*.ico  binary
+*.bin  binary
+*.uart binary
+*.enc  binary
