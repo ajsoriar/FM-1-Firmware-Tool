@@ -138,6 +138,37 @@ class UiStateTests(unittest.TestCase):
         self.assertTrue(self.app.uboot_frame.winfo_manager())
         self.assertIn("does not write firmware", self.text(self.app.uboot_warning))
 
+    def test_write_confirmation_is_manual_by_default(self):
+        self.ctl.detect()
+        drain(self.ctl)
+        self.assertFalse(self.app.write_auto_var.get())
+        self.assertTrue(self.app.write_frame.winfo_manager())
+        preview = self.text(self.app.write_summary)
+        self.assertIn("test.fwsc", preview)
+        self.assertIn("boot head 0x0000-0x3FFF is untouched", preview)
+        self.assertIn("WITHOUT asking", self.text(self.app.write_warning))
+        self.ctl.start_install()
+        drain(self.ctl)
+        self.assertIsNotNone(self.app.dialog)
+        self.assertEqual(self.app.dialog.event["phrase"], "WRITE")
+        self.assertEqual(self.launcher.jobs[-1].answers, [])
+
+    def test_write_confirmation_is_sent_automatically_when_checked(self):
+        self.ctl.detect()
+        drain(self.ctl)
+        self.app.write_auto_var.set(True)
+        self.ctl.start_install()
+        drain(self.ctl)
+        restore_job = next(job for job in self.launcher.jobs if "restore" in job.argv)
+        self.assertEqual(restore_job.answers, ["WRITE"])
+        self.assertIsNone(self.app.dialog)
+        summary = self.text(self.app.write_summary)                   # full technical summary
+        self.assertIn("about to be WRITTEN", summary)
+        self.assertIn("0x4000..0x92FFF", summary)
+        self.assertIn("Do not disconnect", summary)
+        _, status, _, _ = self.app.row_widgets["boot"]
+        self.assertEqual(self.text(status), "Waiting for user")
+
     def test_during_write_cancel_is_disabled_and_warning_shown(self):
         self.ctl.job, self.ctl.job_kind = object(), "restore"
         self.ctl.handle("event", {"schema": 1, "event": "write_started", "start": "0x4000",

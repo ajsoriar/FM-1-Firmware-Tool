@@ -88,7 +88,7 @@ class InstallerApp:
         self.dialog = None
         self._dialog_for = None
         self._auto_confirmation_for = None
-        self._uboot_confirmation_seen = False
+        self._confirmations_seen = set()     # panels showing a real summary, not the preview
         self._log_shown = 0
         self._icon = None
         self._dropped = []
@@ -193,8 +193,10 @@ class InstallerApp:
             ttk.Label(steps, text=text, style="Head.TLabel").grid(row=0, column=col, sticky="w",
                                                                   padx=4)
         self.row_widgets = {}
+        panel_rows = {"rom": None, "confirm": None}       # an auto-confirm panel follows these
+        row = 0
         for i, (step, title) in enumerate(c.ROWS, start=1):
-            row = i + (1 if i > 4 else 0)
+            row += 1
             sym = tk.Label(steps, font=("Segoe UI Symbol", 12), width=2)
             name = ttk.Label(steps, text="%d. %s" % (i, title), style="RowTitle.TLabel")
             status = tk.Label(steps, font=("Segoe UI", 10, "bold"), anchor="w", width=20)
@@ -203,42 +205,35 @@ class InstallerApp:
             for col, w in enumerate((sym, name, status, when, detail)):
                 w.grid(row=row, column=col, sticky="nw", padx=4, pady=1)
             self.row_widgets[step] = (sym, status, when, detail)
+            if step in panel_rows:
+                row += 1
+                panel_rows[step] = row
 
-        self.uboot_frame = tk.Frame(steps, background="#f3f4f6", highlightthickness=1,
-                                    highlightbackground="#9ca3af", padx=8, pady=6)
-        self.uboot_frame.grid(row=5, column=1, columnspan=4, sticky="ew", padx=4, pady=5)
-        self.uboot_frame.columnconfigure(2, weight=1)
-        self.uboot_auto_var = tk.BooleanVar(value=True)
-        ttk.Checkbutton(self.uboot_frame, text="Auto fill with",
-                        variable=self.uboot_auto_var,
-                        command=self._uboot_auto_changed).grid(row=0, column=0, sticky="w")
-        self.uboot_phrase_var = tk.StringVar(value="UBOOT")
-        # tk.Entry, not ttk: the vista theme ignores fieldbackground on a readonly ttk.Entry.
-        tk.Entry(self.uboot_frame, textvariable=self.uboot_phrase_var, width=24,
-                 state="readonly", readonlybackground="white", relief="flat",
-                 highlightthickness=1, highlightbackground="#9ca3af", takefocus=0,
-                 font=("Segoe UI", 11, "bold")).grid(row=0, column=1, sticky="w", padx=(6, 0))
-        ttk.Label(self.uboot_frame, text="When checked, UBOOT is sent automatically; "
-                  "uncheck to require the confirmation window.",
-                  foreground="#2563eb").grid(row=0, column=2, sticky="w", padx=(12, 0))
-        self.uboot_summary = ttk.Label(self.uboot_frame, justify="left",
-                                       font=("Consolas", 10), wraplength=900)
-        self.uboot_summary.grid(row=1, column=0, columnspan=3, sticky="ew", pady=(8, 2))
-        self.uboot_warning = tk.Label(
-            self.uboot_frame, text="⚠  This sends the ROM key and enters recovery mode; "
-            "it does not write firmware. The screen will go black. Power-cycle the FM-1 "
-            "to return to its firmware.", foreground="#b91c1c", background="#f3f4f6",
-            justify="left", anchor="w", wraplength=900, font=("Segoe UI", 10, "bold"))
-        self.uboot_warning.grid(row=2, column=0, columnspan=3, sticky="ew", pady=(4, 0))
+        (self.uboot_frame, self.uboot_auto_var, self.uboot_phrase_var, self.uboot_summary,
+         self.uboot_warning) = self._auto_confirm_panel(
+            steps, panel_rows["rom"], "UBOOT", auto=True,
+            hint="When checked, UBOOT is sent automatically; "
+                 "uncheck to require the confirmation window.",
+            warning="⚠  This sends the ROM key and enters recovery mode; it does not write "
+                    "firmware. The screen will go black. Power-cycle the FM-1 to return to "
+                    "its firmware.")
+        (self.write_frame, self.write_auto_var, self.write_phrase_var, self.write_summary,
+         self.write_warning) = self._auto_confirm_panel(
+            steps, panel_rows["confirm"], "WRITE", auto=False,
+            hint="When checked, WRITE is sent automatically once the backup is verified; "
+                 "uncheck to require the confirmation window.",
+            warning="⚠  When checked, the FM-1 flash is erased and written WITHOUT asking. "
+                    "Do not disconnect or power off the FM-1 during erase, write, or "
+                    "verification; this cannot be cancelled. The verified full-flash backup "
+                    "is the way back if anything goes wrong.")
         self.uboot_summary.configure(text="\n".join(self._uboot_preview_lines()))
+        self.write_summary.configure(text="\n".join(self._write_preview_lines()))
 
         steps.bind("<Configure>", lambda e: self.root.after_idle(self._wrap_details))
-        self.uboot_frame.bind("<Configure>", lambda e: self.root.after_idle(self._wrap_details))
         self.progress = ttk.Progressbar(steps, maximum=100)
-        self.progress.grid(row=len(c.ROWS) + 2, column=0, columnspan=5, sticky="ew",
-                           pady=(8, 0))
+        self.progress.grid(row=row + 1, column=0, columnspan=5, sticky="ew", pady=(8, 0))
         self.progress_label = ttk.Label(steps, foreground="#374151")
-        self.progress_label.grid(row=len(c.ROWS) + 3, column=0, columnspan=5, sticky="w")
+        self.progress_label.grid(row=row + 2, column=0, columnspan=5, sticky="w")
 
         self.notice = tk.Label(outer, justify="left", anchor="w", padx=10, pady=6,
                                font=("Segoe UI", 10, "bold"), wraplength=980)
@@ -272,6 +267,32 @@ class InstallerApp:
         self.log.pack(fill="both", expand=True)
         self.log_frame.grid_remove()
 
+    def _auto_confirm_panel(self, steps, row, phrase, auto, hint, warning):
+        """The box under a confirmation step: auto-answer checkbox, its summary and warning."""
+        frame = tk.Frame(steps, background="#f3f4f6", highlightthickness=1,
+                         highlightbackground="#9ca3af", padx=8, pady=6)
+        frame.grid(row=row, column=1, columnspan=4, sticky="ew", padx=4, pady=5)
+        frame.columnconfigure(2, weight=1)
+        auto_var = tk.BooleanVar(value=auto)
+        ttk.Checkbutton(frame, text="Auto fill with", variable=auto_var,
+                        command=self.refresh).grid(row=0, column=0, sticky="w")
+        phrase_var = tk.StringVar(value=phrase)
+        # tk.Entry, not ttk: the vista theme ignores fieldbackground on a readonly ttk.Entry.
+        tk.Entry(frame, textvariable=phrase_var, width=24,
+                 state="readonly", readonlybackground="white", relief="flat",
+                 highlightthickness=1, highlightbackground="#9ca3af", takefocus=0,
+                 font=("Segoe UI", 11, "bold")).grid(row=0, column=1, sticky="w", padx=(6, 0))
+        ttk.Label(frame, text=hint, foreground="#2563eb").grid(row=0, column=2, sticky="w",
+                                                              padx=(12, 0))
+        summary = ttk.Label(frame, justify="left", font=("Consolas", 10), wraplength=900)
+        summary.grid(row=1, column=0, columnspan=3, sticky="ew", pady=(8, 2))
+        warn = tk.Label(frame, text=warning, foreground="#b91c1c", background="#f3f4f6",
+                        justify="left", anchor="w", wraplength=900,
+                        font=("Segoe UI", 10, "bold"))
+        warn.grid(row=2, column=0, columnspan=3, sticky="ew", pady=(4, 0))
+        frame.bind("<Configure>", lambda e: self.root.after_idle(self._wrap_details))
+        return frame, auto_var, phrase_var, summary, warn
+
     def _toggle_log(self):
         if self.show_log.get():
             self.log_frame.grid()
@@ -289,10 +310,13 @@ class InstallerApp:
             for _, _, _, detail in self.row_widgets.values():
                 detail.configure(wraplength=width)
         self.notice.configure(wraplength=max(300, frame_width - 20))
-        uboot_width = self.uboot_frame.winfo_width()
-        if uboot_width > 1:
-            width = max(300, uboot_width - 24)
-            for label in (self.uboot_summary, self.uboot_warning):
+        for frame, labels in ((self.uboot_frame, (self.uboot_summary, self.uboot_warning)),
+                              (self.write_frame, (self.write_summary, self.write_warning))):
+            panel_width = frame.winfo_width()
+            if panel_width <= 1:
+                continue
+            width = max(300, panel_width - 24)
+            for label in labels:
                 if width != int(str(label.cget("wraplength")) or 0):
                     label.configure(wraplength=width)
 
@@ -407,32 +431,34 @@ class InstallerApp:
             self.log.configure(state="disabled")
             self._log_shown = len(ctl.log_lines)
 
+        panels = {"uboot": (self.uboot_auto_var, self.uboot_phrase_var, self.uboot_summary,
+                            self._uboot_preview_lines),
+                  "write": (self.write_auto_var, self.write_phrase_var, self.write_summary,
+                            self._write_preview_lines)}
         pending = ctl.pending_confirmation
+        for cid, (_, _, summary, preview) in panels.items():
+            if cid not in self._confirmations_seen:
+                summary.configure(text="\n".join(preview()))
         if pending is None:
             self._auto_confirmation_for = None
-            if not self._uboot_confirmation_seen:
-                self.uboot_summary.configure(text="\n".join(self._uboot_preview_lines()))
             if self.dialog is not None:
                 self.dialog.grab_release()
                 self.dialog.destroy()
                 self.dialog = None
             self._dialog_for = None
-        elif pending["id"] == "uboot":
-            self._uboot_confirmation_seen = True
-            self.uboot_summary.configure(text="\n".join(ctl.confirmation_lines(pending)))
-            if self.uboot_auto_var.get():
-                if self._auto_confirmation_for is not pending:
-                    self._auto_confirmation_for = pending
-                    ctl.answer_confirmation(self.uboot_phrase_var.get())
-            elif self.dialog is None and self._dialog_for is not pending:
-                self._dialog_for = pending
-                self.dialog = ConfirmDialog(self, pending)
+            return
+        auto_var = phrase_var = None
+        if pending["id"] in panels:
+            auto_var, phrase_var, summary, _ = panels[pending["id"]]
+            self._confirmations_seen.add(pending["id"])
+            summary.configure(text="\n".join(ctl.confirmation_lines(pending)))
+        if auto_var is not None and auto_var.get():
+            if self._auto_confirmation_for is not pending:
+                self._auto_confirmation_for = pending
+                ctl.answer_confirmation(phrase_var.get())
         elif self.dialog is None and self._dialog_for is not pending:
             self._dialog_for = pending
             self.dialog = ConfirmDialog(self, pending)
-
-    def _uboot_auto_changed(self):
-        self.refresh()
 
     def _uboot_preview_lines(self):
         device = self.controller.device or {}
@@ -452,6 +478,28 @@ class InstallerApp:
             "The FM-1 will enter ROM mode (WL82 UBOOT1.00 disk). The screen going black is "
             "expected.",
             "This step writes no firmware. Power-cycling returns the FM-1 to its firmware.",
+        ])
+        return lines
+
+    def _write_preview_lines(self):
+        pkg = self.controller.package or {}
+        lines = ["The FM-1 flash will be WRITTEN once the full-flash backup is verified:"]
+        if pkg:
+            lines.extend([
+                "  Firmware   %s" % pkg.get("name"),
+                "  Identity   %s (%s)" % (pkg.get("identity"), c.KIND_TEXT.get(
+                    pkg.get("kind"), pkg.get("description"))),
+                "  SHA-256    %s" % pkg.get("firmware_sha256"),
+            ])
+        elif self.controller.package_path:
+            lines.append("  Firmware   %s" % self.controller.package_path.name)
+        else:
+            lines.append("  Firmware   (choose a .fwsc package)")
+        lines.extend([
+            "  Target     firmware region only; boot head 0x0000-0x3FFF is untouched",
+            "  Backup     taken and read back twice before anything is written",
+            "The exact address range, device and backup file appear here when the write is "
+            "about to start.",
         ])
         return lines
 
@@ -494,7 +542,7 @@ class InstallerApp:
 
     def install(self):
         if self.controller.can_install():
-            self._uboot_confirmation_seen = False
+            self._confirmations_seen.clear()
             self.controller.start_install()
 
     def cancel(self):
