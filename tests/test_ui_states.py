@@ -9,6 +9,8 @@ import time
 import tkinter as tk
 import unittest
 from pathlib import Path
+from tkinter import ttk
+from unittest import mock
 
 from support import ScriptedLauncher, write_package
 from test_controller_mock import Script, drain
@@ -104,6 +106,7 @@ class UiStateTests(unittest.TestCase):
         self.ctl.detect()
         drain(self.ctl)
         self.app.uboot_auto_var.set(False)
+        self.app.write_auto_var.set(False)
         self.ctl.start_install()
         drain(self.ctl)
         self.assertIsNotNone(self.app.dialog)                         # UBOOT
@@ -133,30 +136,28 @@ class UiStateTests(unittest.TestCase):
         self.assertTrue(self.app.uboot_auto_var.get())
         softkey_job = next(job for job in self.launcher.jobs if "softkey" in job.argv)
         self.assertEqual(softkey_job.answers, ["UBOOT"])
-        self.assertIsNotNone(self.app.dialog)                         # WRITE remains explicit
-        self.assertEqual(self.app.dialog.event["phrase"], "WRITE")
         self.assertTrue(self.app.uboot_frame.winfo_manager())
         self.assertIn("does not write firmware", self.text(self.app.uboot_warning))
 
-    def test_write_confirmation_is_manual_by_default(self):
+    def test_write_confirmation_asks_when_unchecked(self):
         self.ctl.detect()
         drain(self.ctl)
-        self.assertFalse(self.app.write_auto_var.get())
-        self.assertTrue(self.app.write_frame.winfo_manager())
-        preview = self.text(self.app.write_summary)
-        self.assertIn("test.fwsc", preview)
-        self.assertIn("boot head 0x0000-0x3FFF is untouched", preview)
-        self.assertIn("WITHOUT asking", self.text(self.app.write_warning))
+        self.app.write_auto_var.set(False)
         self.ctl.start_install()
         drain(self.ctl)
         self.assertIsNotNone(self.app.dialog)
         self.assertEqual(self.app.dialog.event["phrase"], "WRITE")
         self.assertEqual(self.launcher.jobs[-1].answers, [])
 
-    def test_write_confirmation_is_sent_automatically_when_checked(self):
+    def test_write_confirmation_is_sent_automatically_by_default(self):
         self.ctl.detect()
         drain(self.ctl)
-        self.app.write_auto_var.set(True)
+        self.assertTrue(self.app.write_auto_var.get())
+        self.assertTrue(self.app.write_frame.winfo_manager())
+        preview = self.text(self.app.write_summary)
+        self.assertIn("test.fwsc", preview)
+        self.assertIn("boot head 0x0000-0x3FFF is untouched", preview)
+        self.assertIn("WITHOUT asking", self.text(self.app.write_warning))
         self.ctl.start_install()
         drain(self.ctl)
         restore_job = next(job for job in self.launcher.jobs if "restore" in job.argv)
@@ -171,11 +172,9 @@ class UiStateTests(unittest.TestCase):
 
     def test_steps_scroll_in_a_short_window(self):
         self.root.deiconify()
-        self.root.minsize(1, 1)
-        self.root.geometry("900x420")
+        self.root.geometry("%dx%d" % self.root.minsize())             # smallest allowed window
         self.ctl.detect()
         drain(self.ctl)
-        self.app.write_auto_var.set(True)
         self.ctl.start_install()
         drain(self.ctl)
         self.root.update()
@@ -183,6 +182,43 @@ class UiStateTests(unittest.TestCase):
         self.assertGreater(self.app.steps_frame.winfo_height(), canvas.winfo_height())
         self.assertLess(canvas.yview()[1] - canvas.yview()[0], 1.0)  # only part is visible
         self.assertTrue(self.app.progress.winfo_ismapped())          # outside the scroll area
+
+    def drop_area_text(self):
+        cv = self.app.drop_area
+        return " ".join(cv.itemcget(i, "text") for i in cv.find_all() if cv.type(i) == "text")
+
+    def test_drop_area_names_the_firmware_and_lights_while_a_file_is_dragged_over(self):
+        self.root.deiconify()
+        self.app.drop_enabled = True
+        self.root.update()
+        self.assertIn("test.fwsc", self.drop_area_text())
+        self.assertGreaterEqual(self.app.drop_area.winfo_height(), 100)
+        button = [True]
+        with mock.patch.object(ui.dnd_win, "mouse_button_down", lambda: button[0]), \
+                mock.patch.object(self.root, "winfo_containing",
+                                  lambda x, y: self.app.drop_area):
+            self.app._track_drag_hover()
+            self.assertFalse(self.app._drop_hot)                      # needs two polls
+            self.app._track_drag_hover()
+            self.assertTrue(self.app._drop_hot)
+            self.assertIn("Release to use this firmware", self.drop_area_text())
+            button[0] = False
+            self.app._track_drag_hover()
+            self.assertFalse(self.app._drop_hot)
+            self.app._press_inside = button[0] = True                 # a click, not a drag
+            self.app._track_drag_hover()
+            self.app._track_drag_hover()
+            self.assertFalse(self.app._drop_hot)
+
+    def test_progress_bar_shows_its_percentage(self):
+        row = self.ctl.rows["backup"]
+        row.status, row.progress = c.RUNNING, 42
+        self.app.refresh()
+        style = ttk.Style(self.root)
+        self.assertEqual(style.lookup("Pct.Horizontal.TProgressbar", "text"), "42 %")
+        row.status = c.PASS
+        self.app.refresh()
+        self.assertEqual(style.lookup("Pct.Horizontal.TProgressbar", "text"), "")
 
     def test_during_write_cancel_is_disabled_and_warning_shown(self):
         self.ctl.job, self.ctl.job_kind = object(), "restore"
@@ -218,9 +254,6 @@ class UiStateTests(unittest.TestCase):
         self.ctl.detect()
         drain(self.ctl)
         self.ctl.start_install()
-        drain(self.ctl)
-        self.app.dialog.var.set("WRITE")
-        self.app.dialog._confirm()
         drain(self.ctl)
         _, status, _, _ = self.app.row_widgets["boot"]
         self.assertEqual(self.text(status), "Waiting for user")

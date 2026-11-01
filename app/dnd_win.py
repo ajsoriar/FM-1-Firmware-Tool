@@ -18,7 +18,25 @@ WM_COPYGLOBALDATA = 0x0049
 MSGFLT_ALLOW = 1
 GWLP_WNDPROC = -4
 
+VK_LBUTTON = 0x01
+VK_RBUTTON = 0x02
+
 _keep = []          # window procedures must outlive the window
+
+
+def mouse_button_down() -> bool:
+    """A mouse button is held now, in any app: the only drag hint a WM_DROPFILES window
+    gets. Both buttons count (right-drag drops too; GetAsyncKeyState sees physical ones)."""
+    if sys.platform != "win32":
+        return False
+    try:
+        import ctypes
+
+        state = ctypes.WinDLL("user32").GetAsyncKeyState
+        state.restype = ctypes.c_short
+        return any(state(vk) & 0x8000 for vk in (VK_LBUTTON, VK_RBUTTON))
+    except (OSError, AttributeError):
+        return False
 
 
 def enable_file_drop(toplevel, sink) -> bool:

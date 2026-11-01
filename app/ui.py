@@ -92,6 +92,10 @@ class InstallerApp:
         self._log_shown = 0
         self._icon = None
         self._dropped = []
+        self.drop_enabled = False
+        self._drop_hot = False                 # a drag from another app is over the drop area
+        self._drag_over = False                # ...as seen on the previous poll
+        self._press_inside = False             # a mouse button went down inside this app
         root.title("FM-1 Firmware Tool %s" % __version__
                    + (" (simulation)" if controller.simulation else ""))
         scale = root.winfo_fpixels("1i") / 96.0          # geometry is in pixels, fonts in points
@@ -104,9 +108,6 @@ class InstallerApp:
         controller.subscribe(self.refresh)
         root.protocol("WM_DELETE_WINDOW", self.on_close)
         self.drop_enabled = drop_enabled and dnd_win.enable_file_drop(root, self._dropped)
-        self.drop_hint.configure(text="or drag a .fwsc file into this window"
-                                 if self.drop_enabled else
-                                 "or drop it onto run_gui.bat")
         self.refresh()
         self._after = root.after(POLL_MS, self._poll)
 
@@ -121,7 +122,33 @@ class InstallerApp:
         style.configure("Row.TLabel", font=("Segoe UI", 10))
         style.configure("RowTitle.TLabel", font=("Segoe UI", 10, "bold"))
         style.configure("Head.TLabel", font=("Segoe UI", 9, "bold"), foreground="#374151")
+        # Native vista buttons ignore colours: borrow clam's border element, which honours them.
+        try:
+            style.element_create("Flat.Button.border", "from", "clam", "Button.border")
+        except tk.TclError:                    # already created by an earlier window
+            pass
+        style.layout("TButton", [("Flat.Button.border", {"sticky": "nswe", "border": "1",
+            "children": [("Button.focus", {"sticky": "nswe", "children": [
+                ("Button.padding", {"sticky": "nswe", "children": [
+                    ("Button.label", {"sticky": "nswe"})]})]})]})])
+        for name, base, active, pressed, edge in (
+                ("TButton", "#2563eb", "#1d4ed8", "#1e40af", "#1d4ed8"),
+                ("Install.TButton", "#16a34a", "#15803d", "#166534", "#15803d")):
+            shades = [("disabled", "#d1d5db"), ("pressed", pressed), ("active", active)]
+            style.configure(name, background=base, lightcolor=base, darkcolor=base,
+                            bordercolor=edge, foreground="white", focuscolor="white",
+                            padding=(10, 4))
+            style.map(name, background=shades, lightcolor=shades, darkcolor=shades,
+                      bordercolor=[("disabled", "#9ca3af")],
+                      foreground=[("disabled", "#6b7280")])
         style.configure("Install.TButton", font=("Segoe UI", 11, "bold"))
+        style.configure("TLabelframe.Label", font=("Segoe UI", 10, "bold"))
+        # Tk 8.6 progress bars have no text: a label element shows the style's "text".
+        style.layout("Pct.Horizontal.TProgressbar", [
+            ("Horizontal.Progressbar.trough", {"sticky": "nswe", "children": [
+                ("Horizontal.Progressbar.pbar", {"side": "left", "sticky": "ns"})]}),
+            ("Horizontal.Progressbar.label", {"sticky": ""})])
+        style.configure("Pct.Horizontal.TProgressbar", text="", font=("Segoe UI", 9, "bold"))
 
     def _build(self):
         root = self.root
@@ -158,8 +185,16 @@ class InstallerApp:
                                                                          sticky="ew")
         self.btn_pkg = ttk.Button(fw, text="Choose .fwsc...", command=self.choose_package)
         self.btn_pkg.grid(row=0, column=1, padx=(8, 0))
-        self.drop_hint = ttk.Label(fw, foreground="#6b7280")
-        self.drop_hint.grid(row=1, column=0, sticky="w")
+        scale = root.winfo_fpixels("1i") / 96.0
+        self.drop_area = tk.Canvas(fw, height=int(100 * scale), highlightthickness=0,
+                                   background="white", cursor="hand2")
+        self.drop_area.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(8, 0))
+        self.drop_area.bind("<Configure>", lambda e: self._draw_drop_area())
+        self.drop_area.bind("<Button-1>", lambda e: self._drop_area_clicked())
+        self.root.bind_all("<ButtonPress>", lambda e: setattr(self, "_press_inside", True),
+                           add="+")
+        self.root.bind_all("<ButtonRelease>", lambda e: setattr(self, "_press_inside", False),
+                           add="+")
         self.pkg_warn = tk.Label(fw, fg="#92400e", bg="#fef3c7", justify="left", anchor="w")
         self.pkg_warn.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(4, 0))
 
@@ -238,7 +273,7 @@ class InstallerApp:
                     "its firmware.")
         (self.write_frame, self.write_auto_var, self.write_phrase_var, self.write_summary,
          self.write_warning) = self._auto_confirm_panel(
-            steps, panel_rows["confirm"], "WRITE", auto=False,
+            steps, panel_rows["confirm"], "WRITE", auto=True,
             hint="When checked, WRITE is sent automatically once the backup is verified; "
                  "uncheck to require the confirmation window.",
             warning="⚠  When checked, the FM-1 flash is erased and written WITHOUT asking. "
@@ -248,7 +283,7 @@ class InstallerApp:
         self.uboot_summary.configure(text="\n".join(self._uboot_preview_lines()))
         self.write_summary.configure(text="\n".join(self._write_preview_lines()))
 
-        self.progress = ttk.Progressbar(box, maximum=100)
+        self.progress = ttk.Progressbar(box, maximum=100, style="Pct.Horizontal.TProgressbar")
         self.progress.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(8, 0))
         self.progress_label = ttk.Label(box, foreground="#374151")
         self.progress_label.grid(row=2, column=0, columnspan=2, sticky="w")
@@ -310,6 +345,56 @@ class InstallerApp:
         warn.grid(row=2, column=0, columnspan=3, sticky="ew", pady=(4, 0))
         frame.bind("<Configure>", lambda e: self.root.after_idle(self._wrap_details))
         return frame, auto_var, phrase_var, summary, warn
+
+    def _draw_drop_area(self):
+        cv = self.drop_area
+        w, h = cv.winfo_width(), cv.winfo_height()
+        if w <= 1:
+            return
+        pkg = self.controller.package_path
+        if self._drop_hot:
+            title, sub = "Release to use this firmware", ""
+        elif not self.drop_enabled:
+            title = "✔  %s" % pkg.name if pkg else "Click to choose a .fwsc firmware file"
+            sub = "Drag and drop is unavailable here; drop the file onto run_gui.bat instead"
+        elif pkg:
+            title, sub = "✔  %s" % pkg.name, "Drop another .fwsc file here or click to replace it"
+        else:
+            title = "⬇  Drop a .fwsc firmware file here"
+            sub = "or click to browse · dropping it anywhere in this window also works"
+        edge, ink = ("#2563eb", "#1d4ed8") if self._drop_hot else ("#9ca3af", "#374151")
+        cv.delete("all")
+        cv.configure(background="#dbeafe" if self._drop_hot else "white")
+        cv.create_rectangle(2, 2, w - 3, h - 3, outline=edge, width=2, dash=(6, 4))
+        cv.create_text(w // 2, h // 2 - (10 if sub else 0), text=title, fill=ink,
+                       font=("Segoe UI", 12, "bold"))
+        if sub:
+            cv.create_text(w // 2, h // 2 + 16, text=sub, fill="#6b7280", font=("Segoe UI", 9))
+
+    def _drop_area_clicked(self):
+        if str(self.btn_pkg.cget("state")) != "disabled":
+            self.choose_package()
+
+    def _track_drag_hover(self):
+        """Light the drop area while a drag from another app is over it.
+
+        A WM_DROPFILES window gets no drag-over message, so this polls: a mouse button is
+        held, it was not pressed inside this app, and the pointer is over the drop area,
+        on two polls in a row (a click on the area is seen by Tk before the second one).
+        """
+        over = False
+        if not dnd_win.mouse_button_down():
+            self._press_inside = False         # its release may have gone to a native dialog
+        elif self.drop_enabled and not self._press_inside:
+            x, y = self.root.winfo_pointerxy()
+            try:
+                over = self.root.winfo_containing(x, y) is self.drop_area
+            except (KeyError, tk.TclError):
+                pass
+        hot, self._drag_over = over and self._drag_over, over
+        if hot != self._drop_hot:
+            self._drop_hot = hot
+            self._draw_drop_area()
 
     def _steps_resized(self, _event):
         self.steps_canvas.configure(scrollregion=self.steps_canvas.bbox("all"))
@@ -454,6 +539,9 @@ class InstallerApp:
         else:
             self.progress.configure(value=0)
             self.progress_label.configure(text="")
+        ttk.Style(self.root).configure("Pct.Horizontal.TProgressbar",
+                                       text="%d %%" % running.progress if running else "")
+        self._draw_drop_area()
 
         if ctl.notice:
             bg, fg = NOTICE_STYLE[ctl.notice[0]]
@@ -566,6 +654,7 @@ class InstallerApp:
         if self._dropped:
             batches, self._dropped[:] = list(self._dropped), []
             self.on_drop([p for batch in batches for p in batch])
+        self._track_drag_hover()
         self.controller.pump()
         self._after = self.root.after(POLL_MS, self._poll)
 
