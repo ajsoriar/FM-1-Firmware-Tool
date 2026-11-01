@@ -49,6 +49,20 @@ if ($LASTEXITCODE -ne 0) { throw "PyInstaller failed." }
 
 $exe = Join-Path $AppDir "$AppName.exe"
 if (-not (Test-Path $exe)) { throw "PyInstaller reported success but $exe is missing." }
-Compress-Archive -Path $AppDir -DestinationPath $ZipPath -Force
+$archiveCreated = $false
+for ($attempt = 1; $attempt -le 4; $attempt++) {
+    try {
+        Compress-Archive -Path $AppDir -DestinationPath $ZipPath -Force -ErrorAction Stop
+        if (-not (Test-Path $ZipPath)) { throw "ZIP creation finished without producing $ZipPath." }
+        $archiveCreated = $true
+        break
+    }
+    catch {
+        if ($attempt -eq 4) { throw }
+        Write-Warning "ZIP creation attempt $attempt failed: $($_.Exception.Message). Retrying in 2 seconds."
+        Start-Sleep -Seconds 2
+    }
+}
+if (-not $archiveCreated) { throw "Could not create $ZipPath." }
 Get-FileHash $exe -Algorithm SHA256 | Format-List Path, Hash
 Write-Output "Built $exe and $ZipPath (one-folder distribution)."
