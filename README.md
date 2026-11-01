@@ -1,5 +1,7 @@
 # FM-1 Firmware Tool
 
+Firmware recovery tool for the M-VAVE FM-1 when the device becomes stuck or unresponsive.
+
 ![FM-1 Firmware Tool application window](docs/images/app-screen.png)
 
 ## What problem does this app solve?
