@@ -13,8 +13,7 @@ from pathlib import Path
 from support import ScriptedLauncher, write_package
 from test_controller_mock import Script, drain
 
-from app import controller as c
-from app import ui
+from app import __version__, controller as c, ui
 
 
 def post_drop(hwnd, paths):
@@ -72,10 +71,18 @@ class UiStateTests(unittest.TestCase):
         self.assertEqual(self.text(status), "Pending")
         self.assertEqual(self.text(sym), "○")
 
+    def test_application_version_is_shown_in_window_title(self):
+        self.assertIn(__version__, self.root.title())
+
     def test_detected_through_felucca_alias(self):
         self.ctl.detect()
         drain(self.ctl)
         self.assertIn("FM-1 connected", self.text(self.app.hw_text))
+        uboot_summary = self.text(self.app.uboot_summary)
+        self.assertIn('MIDI port "Felucca"', uboot_summary)
+        self.assertIn("FM-1_9530", uboot_summary)
+        self.assertIn("WL82 UBOOT1.00", uboot_summary)
+        self.assertIn("Power-cycling returns", uboot_summary)
         sub = self.text(self.app.hw_sub)
         self.assertIn("Felucca", sub)
         self.assertIn("FM-1_9530", sub)
@@ -96,6 +103,7 @@ class UiStateTests(unittest.TestCase):
     def test_write_confirmation_dialog(self):
         self.ctl.detect()
         drain(self.ctl)
+        self.app.uboot_auto_var.set(False)
         self.ctl.start_install()
         drain(self.ctl)
         self.assertIsNotNone(self.app.dialog)                         # UBOOT
@@ -116,6 +124,19 @@ class UiStateTests(unittest.TestCase):
         _, status, _, detail = self.app.row_widgets["confirm"]
         self.assertEqual(self.text(status), "Error")
         self.assertIn("Nothing was written", self.text(detail))
+
+    def test_uboot_confirmation_is_sent_automatically_by_default(self):
+        self.ctl.detect()
+        drain(self.ctl)
+        self.ctl.start_install()
+        drain(self.ctl)
+        self.assertTrue(self.app.uboot_auto_var.get())
+        softkey_job = next(job for job in self.launcher.jobs if "softkey" in job.argv)
+        self.assertEqual(softkey_job.answers, ["UBOOT"])
+        self.assertIsNotNone(self.app.dialog)                         # WRITE remains explicit
+        self.assertEqual(self.app.dialog.event["phrase"], "WRITE")
+        self.assertTrue(self.app.uboot_frame.winfo_manager())
+        self.assertIn("does not write firmware", self.text(self.app.uboot_warning))
 
     def test_during_write_cancel_is_disabled_and_warning_shown(self):
         self.ctl.job, self.ctl.job_kind = object(), "restore"
@@ -151,9 +172,6 @@ class UiStateTests(unittest.TestCase):
         self.ctl.detect()
         drain(self.ctl)
         self.ctl.start_install()
-        drain(self.ctl)
-        self.app.dialog.var.set("UBOOT")
-        self.app.dialog._confirm()
         drain(self.ctl)
         self.app.dialog.var.set("WRITE")
         self.app.dialog._confirm()
