@@ -56,7 +56,7 @@ class ConsoleTests(unittest.TestCase):
                         or (self.tmp / "FM1-Installer").exists())
 
     def test_relative_path_from_the_current_folder(self):
-        res = fm1(["check", self.pkg.name], home=self.tmp)
+        res = fm1(["check", self.pkg.name, "--simulate"], home=self.tmp)
         self.assertEqual(res.returncode, cli.EXIT_OK, res.stdout + res.stderr)
         self.assertIn("[ OK ]  1. Firmware selected", res.stdout)
 
