@@ -169,6 +169,21 @@ class UiStateTests(unittest.TestCase):
         _, status, _, _ = self.app.row_widgets["boot"]
         self.assertEqual(self.text(status), "Waiting for user")
 
+    def test_steps_scroll_in_a_short_window(self):
+        self.root.deiconify()
+        self.root.minsize(1, 1)
+        self.root.geometry("900x420")
+        self.ctl.detect()
+        drain(self.ctl)
+        self.app.write_auto_var.set(True)
+        self.ctl.start_install()
+        drain(self.ctl)
+        self.root.update()
+        canvas = self.app.steps_canvas
+        self.assertGreater(self.app.steps_frame.winfo_height(), canvas.winfo_height())
+        self.assertLess(canvas.yview()[1] - canvas.yview()[0], 1.0)  # only part is visible
+        self.assertTrue(self.app.progress.winfo_ismapped())          # outside the scroll area
+
     def test_during_write_cancel_is_disabled_and_warning_shown(self):
         self.ctl.job, self.ctl.job_kind = object(), "restore"
         self.ctl.handle("event", {"schema": 1, "event": "write_started", "start": "0x4000",

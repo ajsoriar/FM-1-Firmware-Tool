@@ -184,9 +184,28 @@ class InstallerApp:
         ttk.Button(conn, text="Open", command=lambda: self._open(
             self.controller.paths.backup_dir)).grid(row=1, column=7, padx=(4, 0), pady=(6, 0))
 
-        steps = ttk.LabelFrame(outer, text="Steps", padding=(8, 4))
-        steps.grid(row=4, column=0, sticky="nsew", pady=(8, 0))
+        box = ttk.LabelFrame(outer, text="Steps", padding=(8, 4))
+        box.grid(row=4, column=0, sticky="nsew", pady=(8, 0))
         outer.rowconfigure(4, weight=1)
+        box.columnconfigure(0, weight=1)
+        box.rowconfigure(0, weight=1)
+        self.steps_box = box
+        # Rows grow while a job runs (details, confirmation summaries), so they scroll inside
+        # the box instead of being cut off in a short window; progress stays visible below.
+        bg = ttk.Style(self.root).lookup("TFrame", "background") or "#f0f0f0"
+        canvas = tk.Canvas(box, height=200, highlightthickness=0, borderwidth=0,
+                           background=bg, yscrollincrement=20)
+        canvas.grid(row=0, column=0, sticky="nsew")
+        scroll = ttk.Scrollbar(box, orient="vertical", command=canvas.yview)
+        scroll.grid(row=0, column=1, sticky="ns")
+        canvas.configure(yscrollcommand=scroll.set)
+        self.steps_canvas = canvas
+        steps = ttk.Frame(canvas)
+        window = canvas.create_window(0, 0, window=steps, anchor="nw")
+        canvas.bind("<Configure>", lambda e: canvas.itemconfigure(window, width=e.width))
+        steps.bind("<Configure>", self._steps_resized)
+        self.root.bind_all("<MouseWheel>", self._steps_wheel, add="+")
+        self._steps_followed = None
         steps.columnconfigure(4, weight=1)
         self.steps_frame = steps
         for col, text in enumerate(("", "Step", "Status", "Time", "Details")):
@@ -229,11 +248,10 @@ class InstallerApp:
         self.uboot_summary.configure(text="\n".join(self._uboot_preview_lines()))
         self.write_summary.configure(text="\n".join(self._write_preview_lines()))
 
-        steps.bind("<Configure>", lambda e: self.root.after_idle(self._wrap_details))
-        self.progress = ttk.Progressbar(steps, maximum=100)
-        self.progress.grid(row=row + 1, column=0, columnspan=5, sticky="ew", pady=(8, 0))
-        self.progress_label = ttk.Label(steps, foreground="#374151")
-        self.progress_label.grid(row=row + 2, column=0, columnspan=5, sticky="w")
+        self.progress = ttk.Progressbar(box, maximum=100)
+        self.progress.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(8, 0))
+        self.progress_label = ttk.Label(box, foreground="#374151")
+        self.progress_label.grid(row=2, column=0, columnspan=2, sticky="w")
 
         self.notice = tk.Label(outer, justify="left", anchor="w", padx=10, pady=6,
                                font=("Segoe UI", 10, "bold"), wraplength=980)
@@ -292,6 +310,44 @@ class InstallerApp:
         warn.grid(row=2, column=0, columnspan=3, sticky="ew", pady=(4, 0))
         frame.bind("<Configure>", lambda e: self.root.after_idle(self._wrap_details))
         return frame, auto_var, phrase_var, summary, warn
+
+    def _steps_resized(self, _event):
+        self.steps_canvas.configure(scrollregion=self.steps_canvas.bbox("all"))
+        self.root.after_idle(self._wrap_details)
+
+    def _steps_wheel(self, event):
+        """Mouse wheel over the steps box scrolls it (bound on "all": the rows are labels)."""
+        try:
+            widget = self.root.winfo_containing(event.x_root, event.y_root)
+        except (KeyError, tk.TclError):        # e.g. a combobox popdown tkinter did not create
+            return
+        if widget is not None and str(widget).startswith(str(self.steps_box)):
+            self.steps_canvas.yview_scroll(-1 if event.delta > 0 else 1, "units")
+
+    def _follow_steps(self, pending):
+        """Scroll the active row or confirmation panel into view when it changes."""
+        target = None
+        if pending is not None:
+            target = {"uboot": self.uboot_frame, "write": self.write_frame}.get(pending["id"])
+        if target is None:
+            target = next((sym for step, (sym, _, _, _) in self.row_widgets.items()
+                           if self.controller.rows[step].status in (c.RUNNING, c.WAITING_USER)),
+                          None)
+        if target is not None and target is not self._steps_followed:
+            self._steps_followed = target
+            self._scroll_into_view(target)
+
+    def _scroll_into_view(self, widget):
+        self.root.update_idletasks()           # place rows whose text just changed
+        canvas, total = self.steps_canvas, self.steps_frame.winfo_height()
+        view_top, view_height = canvas.canvasy(0), canvas.winfo_height()
+        top, bottom = widget.winfo_y(), widget.winfo_y() + widget.winfo_height()
+        if total <= view_height or (top >= view_top and bottom <= view_top + view_height):
+            return
+        if bottom - top > view_height or top < view_top:
+            canvas.yview_moveto(max(0, top - 4) / total)
+        else:
+            canvas.yview_moveto((bottom + 4 - view_height) / total)
 
     def _toggle_log(self):
         if self.show_log.get():
@@ -436,6 +492,7 @@ class InstallerApp:
                   "write": (self.write_auto_var, self.write_phrase_var, self.write_summary,
                             self._write_preview_lines)}
         pending = ctl.pending_confirmation
+        self._follow_steps(pending)
         for cid, (_, _, summary, preview) in panels.items():
             if cid not in self._confirmations_seen:
                 summary.configure(text="\n".join(preview()))
