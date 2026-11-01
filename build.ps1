@@ -1,4 +1,4 @@
-# Build a portable, one-folder Windows app at dist\FM1FirmwareTool.
+# Build a portable, one-folder Windows app at dist\FM1FirmwareTool-<version>.
 # Creates an isolated .venv and installs only the pinned build/runtime deps.
 [CmdletBinding()]
 param(
@@ -18,6 +18,14 @@ if (-not (Test-Path $Python)) {
 & $Python -m pip install --disable-pip-version-check -r motor\requirements-lock.txt -r requirements-build-lock.txt
 if ($LASTEXITCODE -ne 0) { throw "Could not install the pinned build dependencies." }
 
+$Version = (& $Python -c "from app import __version__; print(__version__)").Trim()
+if ($LASTEXITCODE -ne 0 -or $Version -notmatch '^\d+\.\d+\.\d+$') {
+    throw "app\__init__.py must define a valid numeric MAJOR.MINOR.PATCH __version__."
+}
+$AppName = "FM1FirmwareTool-$Version"
+$AppDir = Join-Path "dist" $AppName
+$ZipPath = Join-Path "dist" "$AppName-Windows-x64.zip"
+
 # Verify the vendored recovery engine before packaging it.
 & $Python -c "import sys; sys.path.insert(0, 'motor'); import fm1_unbrick as f; p, bad = f.verify_pins(f.PINS_FILE); sys.exit('changed: ' + ', '.join(bad) if bad else 0)"
 if ($LASTEXITCODE -ne 0) { throw "motor\ does not match motor\pins.json; refusing to build." }
@@ -30,7 +38,7 @@ if (-not $SkipTests) {
 $hidden = @("argparse", "logging", "urllib.request", "zipfile", "select", "ctypes.wintypes",
             "yaml", "crcmod", "rtmidi")
 $hiddenArgs = $hidden | ForEach-Object { "--hidden-import", $_ }
-& $Python -m PyInstaller --noconfirm --clean --windowed --name FM1FirmwareTool `
+& $Python -m PyInstaller --noconfirm --clean --windowed --name $AppName `
     --icon "app\assets\fm1_installer.ico" `
     --add-data "app\resources;app\resources" `
     --add-data "motor;motor" `
@@ -39,8 +47,8 @@ $hiddenArgs = $hidden | ForEach-Object { "--hidden-import", $_ }
     fm1_installer.pyw
 if ($LASTEXITCODE -ne 0) { throw "PyInstaller failed." }
 
-$exe = "dist\FM1FirmwareTool\FM1FirmwareTool.exe"
+$exe = Join-Path $AppDir "$AppName.exe"
 if (-not (Test-Path $exe)) { throw "PyInstaller reported success but $exe is missing." }
-Compress-Archive -Path "dist\FM1FirmwareTool" -DestinationPath "dist\FM1FirmwareTool-Windows-x64.zip" -Force
+Compress-Archive -Path $AppDir -DestinationPath $ZipPath -Force
 Get-FileHash $exe -Algorithm SHA256 | Format-List Path, Hash
-Write-Output "Built $exe and dist\FM1FirmwareTool-Windows-x64.zip (one-folder distribution)."
+Write-Output "Built $exe and $ZipPath (one-folder distribution)."

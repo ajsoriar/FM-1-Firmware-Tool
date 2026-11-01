@@ -77,6 +77,6 @@ Build the Windows app with:
 ./build.ps1
 ```
 
-The script creates an isolated `.venv`, installs pinned runtime and build dependencies, checks `motor/pins.json`, runs the tests, and creates `dist/FM1FirmwareTool/` and `dist/FM1FirmwareTool-Windows-x64.zip`. The build currently uses Python 3.14. An internet connection is needed the first time to download build dependencies. The ZIP contains the full application folder; do not distribute the EXE on its own.
+The script creates an isolated `.venv`, installs pinned runtime and build dependencies, checks `motor/pins.json`, runs the tests, and creates versioned output such as `dist/FM1FirmwareTool-1.0.0/` and `dist/FM1FirmwareTool-1.0.0-Windows-x64.zip`. Set the application version in `app/__init__.py` (`__version__`) before a release. The build currently uses Python 3.14. An internet connection is needed the first time to download build dependencies. The ZIP contains the full application folder; do not distribute the EXE on its own.
 
 The GitHub Actions workflow `.github/workflows/build-windows.yml` runs manually or when a `v*` tag is pushed. It uploads the ZIP as a workflow artifact for 30 days.
