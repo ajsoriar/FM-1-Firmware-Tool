@@ -94,3 +94,5 @@ Third-party components retain their own license notices in `motor/`.
 This project was developed extensively using AI-assisted coding tools, including **ChatGPT, OpenAI Codex, Anthropic Claude, GitHub Copilot, OpenCode, and DeepSeek**, integrated into **Visual Studio Code**.
 
 AI was primarily responsible for generating source code, implementation details, and documentation, under human direction and supervision.
+
+Related: try FM-1 firmwares in the browser with the free community [FM-1 Emulator](https://fm1-emulator.atst.tools/).
